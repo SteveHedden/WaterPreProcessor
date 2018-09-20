@@ -141,6 +141,7 @@ for index, country in countryList.iterrows():
                 (dat2.loc[[country], ['WaterResTotalSurface']].values[0] + dat2.loc[[country], ['WaterGroundTotal']].values[0])
 
 #Now, either we have no data for total, surface, or ground, or we only have data for one of them.
+
 #If we have no data for any then we estimate total renewable water resources (TRWR) using land area
 
 #If we have no data for any 3 of them
