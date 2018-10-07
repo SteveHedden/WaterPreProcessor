@@ -11,6 +11,7 @@ import xlsxwriter
 import statsmodels.api as sm
 from sklearn import linear_model
 import seaborn as sns
+import math
 
 dat= pd.read_csv('C:\\Users\Steve\PycharmProjects\SecondProject\AQUASTATForPull.csv')
 dat['country'] = dat['Country Name in IFs']
@@ -71,8 +72,69 @@ Exog = Exog.rename(columns={'value.LANDIRAREAACTUAL[1]': 'LANDIRAREAEQUIPACTUAL'
                             'value.LANDAREA[1]':'LANDAREA', 'value.POPURBAN/POP':'UrbanPercent', \
                             'value.POPURBAN[1]':'POPURBAN', 'value.VADD[1]':'VADD(man)', \
                             'value.WATSAFE[1]':'WATSAFE(piped)'})
-#LANDIRAREAEQUIPACTUAL = Exog['value.LANDIRAREAACTUAL[1]']
-#print(LANDIRAREAEQUIPACTUAL)
+Exog['logUrbanPercent'] = np.log(Exog['UrbanPercent'])
+Exog['logWATSAFE(piped)'] = np.log(Exog['WATSAFE(piped)'])
+Exog['logGDPPCP'] = np.log(Exog['GDPPCP'])
+
+#Create regression for estimating agricultural water demand
+y = dat2['WaterWithdAgriculture']
+y = y[y < 100]
+X = Exog['LANDIRAREAEQUIPACTUAL']
+dropNulls = pd.concat([y, X], axis=1)
+dropNulls.dropna(inplace=True)
+y = dropNulls['WaterWithdAgriculture']
+X = dropNulls['LANDIRAREAEQUIPACTUAL']
+X = sm.add_constant(X)
+model = sm.OLS(y, X, data=dropNulls, missing='drop')
+AgModel = model.fit()
+#print(AgModel.summary())
+LandEquip = Exog['LANDIRAREAEQUIPACTUAL']
+LandEquip.dropna(inplace=True)
+LandEquip = sm.add_constant(LandEquip)
+LandEquip['predict'] = AgModel.predict(LandEquip)
+LandEquip[LandEquip['predict'] < 0] = 0.005
+
+#Create regression for estimating municipal water demand
+WaterWithdMunicipal = dat2['WaterWithdMunicipal']
+POPURBAN = Exog['POPURBAN']
+y = pd.concat([WaterWithdMunicipal, POPURBAN], axis=1)
+y.dropna(inplace=True)
+y['MunicipalPerCapita'] = y['WaterWithdMunicipal'] / y['POPURBAN']
+y = y['MunicipalPerCapita']
+X = Exog[['logUrbanPercent', 'logWATSAFE(piped)', 'logGDPPCP']]
+dropNulls = pd.concat([y, X], axis=1)
+dropNulls.dropna(inplace=True)
+y = dropNulls['MunicipalPerCapita']
+X = dropNulls[['logUrbanPercent', 'logWATSAFE(piped)', 'logGDPPCP']]
+X = sm.add_constant(X)
+model = sm.OLS(y, X, data=dropNulls, missing='drop')
+MunModel = model.fit()
+#print(AgModel.summary())
+MunIVs = Exog[['logUrbanPercent', 'logWATSAFE(piped)', 'logGDPPCP']]
+MunIVs = sm.add_constant(MunIVs)
+MunIVs['predict'] = MunModel.predict(MunIVs)
+MunIVs['POPURBAN'] = Exog['POPURBAN']
+MunIVs['predict'] = MunIVs['predict'] * MunIVs['POPURBAN']
+MunIVs[MunIVs['predict'] < 0] = 0.005
+
+#Create regression for estimating industrial water demand
+y = dat2['WaterWithdIndustrial']
+# y = y[y<100]
+X = Exog['VADD(man)']
+dropNulls = pd.concat([y, X], axis=1)
+dropNulls.dropna(inplace=True)
+y = dropNulls['WaterWithdIndustrial']
+X = dropNulls['VADD(man)']
+X = sm.add_constant(X)
+model = sm.OLS(y, X, data=dropNulls, missing='drop')
+IndModel = model.fit()
+# print(IndModel.summary())
+IndIV = Exog['VADD(man)']
+IndIV.dropna(inplace=True)
+IndIV = sm.add_constant(IndIV)
+IndIV['predict'] = IndModel.predict(IndIV)
+IndIV[IndIV['predict'] < 0] = 0.005
+
 
 for index, country in countryList.iterrows():
     country = country['country']
@@ -106,34 +168,34 @@ for index, country in countryList.iterrows():
                 (dat2.loc[[country],['WaterWithdAgriculture']].values[0] + dat2.loc[[country],['WaterWithdIndustrial']].values[0])
             if dat2.loc[[country], ['WaterWithdMunicipal']].values[0] < 0:
                 dat2.loc[[country], ['WaterWithdMunicipal']] = 0
-#Estimate ag water demand with irrigated area if we have data
+#Estimate ag water demand with area of land actually irrigated
     if np.isnan(dat2.loc[[country], ['WaterWithdAgriculture']].values[0]):
-        y = dat2['WaterWithdAgriculture']
-        y = y[y<100]
-        X = Exog['LANDIRAREAEQUIPACTUAL']
-        test = pd.concat([y, X], axis=1)
-        test.dropna(inplace=True)
-        y = test['WaterWithdAgriculture']
-        X = test['LANDIRAREAEQUIPACTUAL']
-        X = sm.add_constant(X)
-        model = sm.OLS(y,X, data=test, missing='drop')
-        p = model.fit()
-        #print(p.summary())
-        predict = p.predict(X)
-        LandEquip = Exog['LANDIRAREAEQUIPACTUAL']
-        LandEquip.dropna(inplace=True)
-        LandEquip = sm.add_constant(LandEquip)
-        LandEquip['predict'] = p.predict(LandEquip)
         if country in LandEquip.index:
             dat2.loc[[country], ['WaterWithdAgriculture']] = (LandEquip.loc[[country], ['predict']].values[0])
-
-#This is where we need UrbanPop, UrbanPop(percent), GDPPCP, and WATSAFE to estimate Municipal
-#This is where we need VADD(man) to estimate Industrial
+#Estimate municipal water demand per capita using UrbanPop(percent), GDPPCP, and WATSAFE and then multiply it by POPURBAN
+    if np.isnan(dat2.loc[[country], ['WaterWithdMunicipal']].values[0]):
+        #print(IVs.loc[['Serbia'],:]
+        if country in MunIVs.index:
+            dat2.loc[[country], ['WaterWithdMunicipal']] = (MunIVs.loc[[country], ['predict']].values[0])
+#Estimate industrial water demand using value added from the manufacturing sector
+    if np.isnan(dat2.loc[[country], ['WaterWithdIndustrial']].values[0]):
+        if country in IndIV.index:
+            dat2.loc[[country], ['WaterWithdIndustrial']] = (IndIV.loc[[country], ['predict']].values[0])
 
 #Normalize water demand so that they sum to total
-
+    if not np.isnan(dat2.loc[[country], ['WaterTotalWithd']].values[0]):
+        EmpiricalTotal = dat2.loc[[country], ['WaterTotalWithd']].values[0]
+        Municipal = dat2.loc[[country], ['WaterWithdMunicipal']].values[0]
+        Industrial = dat2.loc[[country], ['WaterWithdIndustrial']].values[0]
+        Agriculture = dat2.loc[[country], ['WaterWithdAgriculture']].values[0]
+        WaterDemandTotal = Municipal + Industrial + Agriculture
+        dat2.loc[[country], ['WaterWithdMunicipal']] = (Municipal / WaterDemandTotal) * EmpiricalTotal
+        dat2.loc[[country], ['WaterWithdIndustrial']] = (Industrial / WaterDemandTotal) * EmpiricalTotal
+        dat2.loc[[country], ['WaterWithdAgriculture']] = (Agriculture / WaterDemandTotal) * EmpiricalTotal
+'''
 #Initialize growth rates for surface, ground, and fossil water withdrawals
-
+'''
+'''
 ##Total water resources
 #Fill in total renewable surface water if we have total and ground
     if np.isnan(dat2.loc[[country],['WaterResTotalRenewSurface']].values[0]):
@@ -171,7 +233,7 @@ for index, country in countryList.iterrows():
 #If we have total and surface, estimate ground
 #If we have total and ground, estimate surface
 #If we have surface and ground, estimate total
-
+'''
 
 #Write to excel
 writer= pd.ExcelWriter('AQUASTATForModel3.xlsx',engine='xlsxwriter')
