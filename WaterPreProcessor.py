@@ -135,6 +135,22 @@ IndIV = sm.add_constant(IndIV)
 IndIV['predict'] = IndModel.predict(IndIV)
 IndIV[IndIV['predict'] < 0] = 0.005
 
+#Create regression for estimating total renewable water resources
+y = dat2['WaterResTotalRenew']
+X = Exog['LANDAREA']
+dropNulls = pd.concat([y, X], axis=1)
+dropNulls.dropna(inplace=True)
+y = dropNulls['WaterResTotalRenew']
+X = dropNulls['LANDAREA']
+X = sm.add_constant(X)
+model = sm.OLS(y, X, data=dropNulls, missing='drop')
+TRWRModel = model.fit()
+# print(IndModel.summary())
+TRWRIV = Exog['LANDAREA']
+TRWRIV.dropna(inplace=True)
+TRWRIV = sm.add_constant(TRWRIV)
+TRWRIV['predict'] = TRWRModel.predict(TRWRIV)
+TRWRIV[TRWRIV['predict'] < 0] = 0.005
 
 for index, country in countryList.iterrows():
     country = country['country']
@@ -181,7 +197,6 @@ for index, country in countryList.iterrows():
     if np.isnan(dat2.loc[[country], ['WaterWithdIndustrial']].values[0]):
         if country in IndIV.index:
             dat2.loc[[country], ['WaterWithdIndustrial']] = (IndIV.loc[[country], ['predict']].values[0])
-
 #Normalize water demand so that they sum to total
     if not np.isnan(dat2.loc[[country], ['WaterTotalWithd']].values[0]):
         EmpiricalTotal = dat2.loc[[country], ['WaterTotalWithd']].values[0]
@@ -192,10 +207,9 @@ for index, country in countryList.iterrows():
         dat2.loc[[country], ['WaterWithdMunicipal']] = (Municipal / WaterDemandTotal) * EmpiricalTotal
         dat2.loc[[country], ['WaterWithdIndustrial']] = (Industrial / WaterDemandTotal) * EmpiricalTotal
         dat2.loc[[country], ['WaterWithdAgriculture']] = (Agriculture / WaterDemandTotal) * EmpiricalTotal
-'''
+
 #Initialize growth rates for surface, ground, and fossil water withdrawals
-'''
-'''
+
 ##Total water resources
 #Fill in total renewable surface water if we have total and ground
     if np.isnan(dat2.loc[[country],['WaterResTotalRenewSurface']].values[0]):
@@ -214,26 +228,53 @@ for index, country in countryList.iterrows():
         if not np.isnan(dat2.loc[[country], ['WaterResTotalRenewSurface']].values[0]) and \
                 not np.isnan(dat2.loc[[country], ['WaterGroundTotal']].values[0]):
             dat2.loc[[country], ['WaterResTotalRenew']] = \
-                (dat2.loc[[country], ['WaterResTotalSurface']].values[0] + dat2.loc[[country], ['WaterGroundTotal']].values[0])
+                (dat2.loc[[country], ['WaterResTotalRenewSurface']].values[0] + dat2.loc[[country], ['WaterGroundTotal']].values[0])
 
 #Now, either we have no data for total, surface, or ground, or we only have data for one of them.
-
 #If we have no data for any then we estimate total renewable water resources (TRWR) using land area
-
-#If we have no data for any 3 of them
-    #Estimate total using land area - need land data
-    #Assume split 71 - 29 surface - ground
-
+#Then assume 71-29 split between surface and ground
+    if np.isnan(dat2.loc[[country], ['WaterResTotalRenew']].values[0]) and \
+        np.isnan(dat2.loc[[country], ['WaterResTotalRenewSurface']].values[0]) and \
+                 np.isnan(dat2.loc[[country], ['WaterGroundTotal']].values[0]):
+        dat2.loc[[country], ['WaterResTotalRenew']] = (TRWRIV.loc[[country], ['predict']].values[0])
+        dat2.loc[[country], ['WaterResTotalRenewSurface']] = dat2.loc[[country], ['WaterResTotalRenew']].values[0] * 0.71
+        dat2.loc[[country], ['WaterGroundTotal']] = dat2.loc[[country], ['WaterResTotalRenew']].values[0] * 0.29
 #If we only have data for total:
+    if not np.isnan(dat2.loc[[country], ['WaterResTotalRenew']].values[0]) and \
+        np.isnan(dat2.loc[[country], ['WaterResTotalRenewSurface']].values[0]) and \
+                 np.isnan(dat2.loc[[country], ['WaterGroundTotal']].values[0]):
+        dat2.loc[[country], ['WaterResTotalRenewSurface']] = dat2.loc[[country], ['WaterResTotalRenew']].values[0] * 0.71
+        dat2.loc[[country], ['WaterGroundTotal']] = dat2.loc[[country], ['WaterResTotalRenew']].values[0] * 0.29
 #If we only have data for surface:
+    if not np.isnan(dat2.loc[[country], ['WaterResTotalRenewSurface']].values[0]) and \
+        np.isnan(dat2.loc[[country], ['WaterResTotalRenew']].values[0]) and \
+                 np.isnan(dat2.loc[[country], ['WaterGroundTotal']].values[0]):
+        dat2.loc[[country], ['WaterResTotalRenew']] = dat2.loc[[country], ['WaterResTotalRenewSurface']].values[0] / 0.71
+        dat2.loc[[country], ['WaterGroundTotal']] = dat2.loc[[country], ['WaterResTotalRenew']].values[0] * 0.29
 #If we only have data for ground:
+    if not np.isnan(dat2.loc[[country], ['WaterGroundTotal']].values[0]) and \
+        np.isnan(dat2.loc[[country], ['WaterResTotalRenew']].values[0]) and \
+                 np.isnan(dat2.loc[[country], ['WaterResTotalRenewSurface']].values[0]):
+        dat2.loc[[country], ['WaterResTotalRenew']] = dat2.loc[[country], ['WaterGroundTotal']].values[0] / 0.29
+        dat2.loc[[country], ['WaterResTotalRenewSurface']] = dat2.loc[[country], ['WaterResTotalRenew']].values[0] * 0.71
 #Subtract overlap of surface and ground and reestimate surface and ground:
+    if not np.isnan(dat2.loc[[country], ['WaterResOverlap']].values[0]):
+        Overlap = dat2.loc[[country], ['WaterResOverlap']].values[0]
+        SurfacePlusGround = dat2.loc[[country], ['WaterResTotalRenewSurface']].values[0] + \
+                            dat2.loc[[country], ['WaterGroundTotal']].values[0]
+        dat2.loc[[country], ['WaterResTotalRenewSurface']].values[0] = \
+            (dat2.loc[[country], ['WaterResTotalRenewSurface']].values[0] / SurfacePlusGround) * (SurfacePlusGround - Overlap)
+        dat2.loc[[country], ['WaterGroundTotal']].values[0] = \
+            (dat2.loc[[country], ['WaterGroundTotal']].values[0] / SurfacePlusGround) * (SurfacePlusGround - Overlap)
+
+    dat2.loc[[country], ['WaterResTotalRenew']].values[0] = (dat2.loc[[country], ['WaterGroundTotal']].values[0]) + \
+                                                        (dat2.loc[[country], ['WaterResTotalRenewSurface']].values[0])
 
 ##Exploitable water resources
 #If we have total and surface, estimate ground
 #If we have total and ground, estimate surface
 #If we have surface and ground, estimate total
-'''
+
 
 #Write to excel
 writer= pd.ExcelWriter('AQUASTATForModel3.xlsx',engine='xlsxwriter')
