@@ -41,13 +41,16 @@ def getYrOrMstRct(lookback, dat, baseyear, datDest, SeriesName):
                 if country in Current.index:
                     datDest.loc[[country], [SeriesName]] = \
                         Current.loc[Current['country'] == country, [SeriesName]].values[0]
-#Call getYrOrMstRct on all series
 
+
+#Call getYrOrMstRct on all series
+'''
 for x in seriesNames:
     print(x)
     dataForModel[x] = ""
     CurrentSeries = dat.loc[:, [x, 'yearRef', 'country']]
     getYrOrMstRct(10, CurrentSeries, 2015, dataForModel, x)
+
 
 #Write to excel
 writer= pd.ExcelWriter('AQUASTATForModel.xlsx',engine='xlsxwriter')
@@ -56,10 +59,20 @@ writer.save()
 writer= pd.ExcelWriter('AQUASTATForModel2.xlsx',engine='xlsxwriter')
 dataForModel.to_excel(writer,sheet_name='1',merge_cells=False)
 writer.save()
+'''
 
-
-dat2= pd.read_excel('C:\\Users\Steve\PycharmProjects\SecondProject\AQUASTATForModel2.xlsx',sheet = '1')
+dat2= pd.read_excel('C:\\Users\Steve\PycharmProjects\WaterPreProcessor\AQUASTATForModel2.xlsx',sheet = '1')
 dat2.set_index(['Country Name in IFs'], inplace=True)
+
+Exog = pd.read_excel('C:\\Users\Steve\PycharmProjects\WaterPreProcessor\ExogenousForModel.xlsx',sheet = '1')
+Exog.set_index(['Country Name in IFs'], inplace=True)
+Exog = Exog.loc[Exog['year'] == 2015, :]
+Exog = Exog.rename(columns={'value.LANDIRAREAACTUAL[1]': 'LANDIRAREAEQUIPACTUAL', 'value.GDPPCP[1]': 'GDPPCP', \
+                            'value.LANDAREA[1]':'LANDAREA', 'value.POPURBAN/POP':'UrbanPercent', \
+                            'value.POPURBAN[1]':'POPURBAN', 'value.VADD[1]':'VADD(man)', \
+                            'value.WATSAFE[1]':'WATSAFE(piped)'})
+#LANDIRAREAEQUIPACTUAL = Exog['value.LANDIRAREAACTUAL[1]']
+#print(LANDIRAREAEQUIPACTUAL)
 
 for index, country in countryList.iterrows():
     country = country['country']
@@ -97,22 +110,23 @@ for index, country in countryList.iterrows():
     if np.isnan(dat2.loc[[country], ['WaterWithdAgriculture']].values[0]):
         y = dat2['WaterWithdAgriculture']
         y = y[y<100]
-        X = dat2['LandEquipIrActual']
+        X = Exog['LANDIRAREAEQUIPACTUAL']
         test = pd.concat([y, X], axis=1)
         test.dropna(inplace=True)
         y = test['WaterWithdAgriculture']
-        X = test['LandEquipIrActual']
+        X = test['LANDIRAREAEQUIPACTUAL']
         X = sm.add_constant(X)
         model = sm.OLS(y,X, data=test, missing='drop')
         p = model.fit()
         #print(p.summary())
         predict = p.predict(X)
-        LandEquip = dat2['LandEquipIrActual']
+        LandEquip = Exog['LANDIRAREAEQUIPACTUAL']
         LandEquip.dropna(inplace=True)
         LandEquip = sm.add_constant(LandEquip)
         LandEquip['predict'] = p.predict(LandEquip)
         if country in LandEquip.index:
             dat2.loc[[country], ['WaterWithdAgriculture']] = (LandEquip.loc[[country], ['predict']].values[0])
+
 #This is where we need UrbanPop, UrbanPop(percent), GDPPCP, and WATSAFE to estimate Municipal
 #This is where we need VADD(man) to estimate Industrial
 
