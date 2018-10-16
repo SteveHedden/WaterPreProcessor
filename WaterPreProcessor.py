@@ -27,8 +27,8 @@ seriesNames.remove('country')
 seriesNames.remove('Country Name in IFs')
 seriesNames.remove('yearRef')
 dat.set_index(['Country Name in IFs'], inplace=True)
-DesalinatedWater = dat.loc[:, ['DesalinatedWater', 'yearRef', 'country']]
-WaterWithdMunicipal = dat.loc[:,['WaterWithdMunicipal', 'yearRef', 'country']]
+#DesalinatedWater = dat.loc[:, ['DesalinatedWater', 'yearRef', 'country']]
+#WaterWithdMunicipal = dat.loc[:,['WaterWithdMunicipal', 'yearRef', 'country']]
 
 def getYrOrMstRct(lookback, dat, baseyear, datDest, SeriesName):
     for y in range(0, lookback, +1):
@@ -152,6 +152,28 @@ TRWRIV = sm.add_constant(TRWRIV)
 TRWRIV['predict'] = TRWRModel.predict(TRWRIV)
 TRWRIV[TRWRIV['predict'] < 0] = 0.005
 
+TotalSurfaceWater = dat2['WaterResTotalRenewSurface']
+TotalWater = dat2['WaterResTotalRenew']
+dropNulls = pd.concat([TotalWater, TotalSurfaceWater], axis=1)
+dropNulls.dropna(inplace=True)
+dropNulls['SurfacePortion'] = dat2['WaterResTotalRenewSurface'] / dat2['WaterResTotalRenew']
+mean = dropNulls['SurfacePortion'].mean()
+median = dropNulls['SurfacePortion'].median()
+
+TotalSurfaceWithd = dat2['WaterSurfaceWithD']
+TotalGroundWithd = dat2['WaterGroundWithD']
+TotalWithD = dat2['WaterTotalWithdSources']
+dropNulls = pd.concat([TotalSurfaceWithd, TotalGroundWithd, TotalWithD], axis=1)
+dropNulls.dropna(inplace=True)
+dropNulls['SurfacePortion'] = dat2['WaterSurfaceWithD'] / dat2['WaterTotalWithdSources']
+dropNulls['GroundPortion'] = dat2['WaterGroundWithD'] / dat2['WaterTotalWithdSources']
+medianSurfaceWithd = dropNulls['SurfacePortion'].median()
+medianGroundWithd = dropNulls['GroundPortion'].median()
+print(medianSurfaceWithd)
+print(medianGroundWithd)
+
+
+#Begin hole filling
 for index, country in countryList.iterrows():
     country = country['country']
 #Fill in agriculture water demand if we have total and both industrial and municipal
@@ -207,7 +229,10 @@ for index, country in countryList.iterrows():
         dat2.loc[[country], ['WaterWithdMunicipal']] = (Municipal / WaterDemandTotal) * EmpiricalTotal
         dat2.loc[[country], ['WaterWithdIndustrial']] = (Industrial / WaterDemandTotal) * EmpiricalTotal
         dat2.loc[[country], ['WaterWithdAgriculture']] = (Agriculture / WaterDemandTotal) * EmpiricalTotal
-
+    else:
+        dat2.loc[[country], ['WaterTotalWithd']] = dat2.loc[[country], ['WaterWithdMunicipal']].values[0] + \
+                                                   dat2.loc[[country], ['WaterWithdIndustrial']].values[0] + \
+                                                   dat2.loc[[country], ['WaterWithdAgriculture']].values[0]
 #Initialize growth rates for surface, ground, and fossil water withdrawals
 
 ##Total water resources
@@ -271,9 +296,118 @@ for index, country in countryList.iterrows():
                                                         (dat2.loc[[country], ['WaterResTotalRenewSurface']].values[0])
 
 ##Exploitable water resources
+    #print(dat2.loc[['Albania'], ['WaterResExploitGround']])
 #If we have total and surface, estimate ground
+    if np.isnan(dat2.loc[[country],['WaterResExploitGround']].values[0]) and \
+            not np.isnan(dat2.loc[[country], ['WaterResExploitSurface']].values[0]) and \
+            not np.isnan(dat2.loc[[country], ['WaterResTotalExploit']].values[0]):
+        dat2.loc[[country], ['WaterResExploitGround']] = \
+            dat2.loc[[country], ['WaterResTotalExploit']].values[0] - \
+            dat2.loc[[country], ['WaterResExploitSurface']].values[0]
 #If we have total and ground, estimate surface
+    if np.isnan(dat2.loc[[country],['WaterResExploitSurface']].values[0]) and \
+            not np.isnan(dat2.loc[[country], ['WaterResExploitGround']].values[0]) and \
+            not np.isnan(dat2.loc[[country], ['WaterResTotalExploit']].values[0]):
+        dat2.loc[[country], ['WaterResExploitSurface']] = \
+            dat2.loc[[country], ['WaterResTotalExploit']].values[0] - \
+            dat2.loc[[country], ['WaterResExploitGround']].values[0]
 #If we have surface and ground, estimate total
+    if np.isnan(dat2.loc[[country],['WaterResTotalExploit']].values[0]) and \
+            not np.isnan(dat2.loc[[country], ['WaterResExploitGround']].values[0]) and \
+            not np.isnan(dat2.loc[[country], ['WaterResExploitSurface']].values[0]):
+        dat2.loc[[country], ['WaterResTotalExploit']] = \
+            dat2.loc[[country], ['WaterResExploitSurface']].values[0] + \
+            dat2.loc[[country], ['WaterResExploitGround']].values[0]
+#If we don't have any exploitable resources data
+    if np.isnan(dat2.loc[[country],['WaterResTotalExploit']].values[0]) and \
+            np.isnan(dat2.loc[[country], ['WaterResExploitGround']].values[0]) and \
+            np.isnan(dat2.loc[[country], ['WaterResExploitSurface']].values[0]):
+        dat2.loc[[country], ['WaterResExploitSurface']] = \
+            dat2.loc[[country], ['WaterResTotalRenewSurface']].values[0] * 0.36
+        dat2.loc[[country], ['WaterResExploitGround']] = \
+            dat2.loc[[country], ['WaterGroundTotal']].values[0] * 0.89
+        dat2.loc[[country], ['WaterResTotalExploit']] = \
+            dat2.loc[[country], ['WaterResExploitGround']].values[0] + \
+            dat2.loc[[country], ['WaterResExploitSurface']].values[0]
+        if dat2.loc[[country],['WaterResTotalExploit']].values[0] < dat2.loc[[country], ['WaterTotalWithd']].values[0]:
+            dat2.loc[[country], ['WaterResExploitSurface']] = dat2.loc[[country],['WaterResTotalExploit']].values[0] / 2
+            dat2.loc[[country], ['WaterResExploitGround']] = dat2.loc[[country],['WaterResTotalExploit']].values[0] / 2
+        if dat2.loc[[country], ['WaterResExploitSurface']].values[0] > \
+                dat2.loc[[country], ['WaterResTotalRenewSurface']].values[0]:
+            dat2.loc[[country], ['WaterResExploitSurface']] = dat2.loc[[country], ['WaterResTotalRenewSurface']].values[0]
+        if dat2.loc[[country], ['WaterResExploitGround']].values[0] > \
+                dat2.loc[[country], ['WaterGroundTotal']].values[0]:
+            dat2.loc[[country], ['WaterResExploitGround']] = dat2.loc[[country], ['WaterGroundTotal']].values[0]
+#If we only have total exploitable
+    if not np.isnan(dat2.loc[[country],['WaterResTotalExploit']].values[0]) and \
+            np.isnan(dat2.loc[[country], ['WaterResExploitGround']].values[0]) and \
+            np.isnan(dat2.loc[[country], ['WaterResExploitSurface']].values[0]):
+        dat2.loc[[country], ['WaterResExploitSurface']] = dat2.loc[[country],['WaterResTotalRenewSurface']].values[0] * 0.36
+        dat2.loc[[country], ['WaterResExploitGround']] = dat2.loc[[country],['WaterGroundTotal']].values[0] * 0.89
+        SurfacePlusGround = dat2.loc[[country], ['WaterResExploitSurface']].values[0] + \
+                            dat2.loc[[country], ['WaterResExploitGround']].values[0]
+        dat2.loc[[country], ['WaterResExploitSurface']] = \
+            (dat2.loc[[country], ['WaterResExploitSurface']].values[0] / SurfacePlusGround) * \
+            dat2.loc[[country], ['WaterResTotalExploit']].values[0]
+        dat2.loc[[country], ['WaterResExploitGround']] = \
+            (dat2.loc[[country], ['WaterResExploitGround']].values[0] / SurfacePlusGround) * \
+            dat2.loc[[country], ['WaterResTotalExploit']].values[0]
+#If we only have surface
+    if not np.isnan(dat2.loc[[country],['WaterResExploitSurface']].values[0]) and \
+            np.isnan(dat2.loc[[country], ['WaterResExploitGround']].values[0]) and \
+            np.isnan(dat2.loc[[country], ['WaterResTotalExploit']].values[0]):
+        dat2.loc[[country], ['WaterResExploitGround']] = dat2.loc[[country],['WaterGroundTotal']].values[0] * 0.89
+        dat2.loc[[country], ['WaterResTotalExploit']] = dat2.loc[[country], ['WaterResExploitGround']].values[0] + \
+                                                        dat2.loc[[country], ['WaterResExploitSurface']].values[0]
+#If we only have ground
+    if not np.isnan(dat2.loc[[country],['WaterResExploitGround']].values[0]) and \
+            np.isnan(dat2.loc[[country], ['WaterResExploitSurface']].values[0]) and \
+            np.isnan(dat2.loc[[country], ['WaterResTotalExploit']].values[0]):
+        dat2.loc[[country], ['WaterResExploitSurface']] = dat2.loc[[country],['WaterResTotalRenewSurface']].values[0] * 0.36
+        dat2.loc[[country], ['WaterResTotalExploit']] = dat2.loc[[country], ['WaterResExploitGround']].values[0] + \
+                                                        dat2.loc[[country], ['WaterResExploitSurface']].values[0]
+#Make sure that total is the sum of surface and ground
+    dat2.loc[[country], ['WaterResTotalExploit']] = dat2.loc[[country], ['WaterResExploitGround']].values[0] + \
+                                                    dat2.loc[[country], ['WaterResExploitSurface']].values[0]
+
+#Initialize water withdrawals
+#If we have total and ground but not surface
+    if not np.isnan(dat2.loc[[country],['WaterTotalWithdSources']].values[0]) and \
+            not np.isnan(dat2.loc[[country], ['WaterGroundWithD']].values[0]) and \
+            np.isnan(dat2.loc[[country], ['WaterSurfaceWithD']].values[0]):
+        dat2.loc[[country], ['WaterSurfaceWithD']] = dat2.loc[[country],['WaterTotalWithdSources']].values[0] - \
+                                                     dat2.loc[[country], ['WaterGroundWithD']].values[0]
+#If we have total and surface but not ground
+    if not np.isnan(dat2.loc[[country],['WaterTotalWithdSources']].values[0]) and \
+            np.isnan(dat2.loc[[country], ['WaterGroundWithD']].values[0]) and \
+            not np.isnan(dat2.loc[[country], ['WaterSurfaceWithD']].values[0]):
+        dat2.loc[[country], ['WaterGroundWithD']] = dat2.loc[[country],['WaterTotalWithdSources']].values[0] - \
+                                                     dat2.loc[[country], ['WaterSurfaceWithD']].values[0]
+#If we have ground and surface but not total
+    if np.isnan(dat2.loc[[country],['WaterTotalWithdSources']].values[0]) and \
+            not np.isnan(dat2.loc[[country], ['WaterGroundWithD']].values[0]) and \
+            not np.isnan(dat2.loc[[country], ['WaterSurfaceWithD']].values[0]):
+        dat2.loc[[country], ['WaterTotalWithdSources']] = dat2.loc[[country],['WaterSurfaceWithD']].values[0] + \
+                                                     dat2.loc[[country], ['WaterGroundWithD']].values[0]
+#If we have total but not surface or ground
+    if not np.isnan(dat2.loc[[country],['WaterTotalWithdSources']].values[0]) and \
+            np.isnan(dat2.loc[[country], ['WaterGroundWithD']].values[0]) and \
+            np.isnan(dat2.loc[[country], ['WaterSurfaceWithD']].values[0]):
+        dat2.loc[[country], ['WaterSurfaceWithD']] = dat2.loc[[country],['WaterTotalWithdSources']].values[0] * \
+            medianSurfaceWithd
+        dat2.loc[[country], ['WaterGroundWithD']] = dat2.loc[[country],['WaterTotalWithdSources']].values[0] * \
+                                                    (1 - medianSurfaceWithd)
+#If we have surface but not total or ground
+    if np.isnan(dat2.loc[[country],['WaterTotalWithdSources']].values[0]) and \
+            np.isnan(dat2.loc[[country], ['WaterGroundWithD']].values[0]) and \
+            not np.isnan(dat2.loc[[country], ['WaterSurfaceWithD']].values[0]):
+        dat2.loc[[country], ['WaterTotalWithdSources']] = dat2.loc[[country], ['WaterSurfaceWithD']].values[0] / \
+            medianSurfaceWithd
+        dat2.loc[[country], ['WaterGroundWithD']] = dat2.loc[[country], ['WaterTotalWithdSources']].values[0] * \
+                                                    (1 - medianSurfaceWithd)
+
+    #print(medianSurfaceWithd)
+    #print(medianGroundWithd)
 
 
 #Write to excel
