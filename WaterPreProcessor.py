@@ -405,6 +405,30 @@ for index, country in countryList.iterrows():
             medianSurfaceWithd
         dat2.loc[[country], ['WaterGroundWithD']] = dat2.loc[[country], ['WaterTotalWithdSources']].values[0] * \
                                                     (1 - medianSurfaceWithd)
+# If we have ground but not total or surface
+    if np.isnan(dat2.loc[[country], ['WaterTotalWithdSources']].values[0]) and \
+            not np.isnan(dat2.loc[[country], ['WaterGroundWithD']].values[0]) and \
+            np.isnan(dat2.loc[[country], ['WaterSurfaceWithD']].values[0]):
+        dat2.loc[[country], ['WaterTotalWithdSources']] = dat2.loc[[country], ['WaterGroundWithD']].values[0] / \
+                                                          (1 - medianSurfaceWithd)
+        dat2.loc[[country], ['WaterSurfaceWithD']] = dat2.loc[[country], ['WaterTotalWithdSources']].values[0] * \
+                                                        (medianSurfaceWithd)
+#If we don't have surface, ground, or total
+    if np.isnan(dat2.loc[[country], ['WaterTotalWithdSources']].values[0]) and \
+            np.isnan(dat2.loc[[country], ['WaterGroundWithD']].values[0]) and \
+            np.isnan(dat2.loc[[country], ['WaterSurfaceWithD']].values[0]):
+        dat2.loc[[country], ['WaterTotalWithdSources']] = dat2.loc[[country], ['WaterTotalWithd']].values[0]
+        dat2.loc[[country], ['WaterSurfaceWithD']] = dat2.loc[[country], ['WaterTotalWithdSources']].values[0] * \
+                                                        (medianSurfaceWithd)
+        dat2.loc[[country], ['WaterGroundWithD']] = dat2.loc[[country], ['WaterTotalWithdSources']].values[0] * \
+                                                        (1 - medianSurfaceWithd)
+        if dat2.loc[[country], ['WaterSurfaceWithD']].values[0] < \
+                dat2.loc[[country], ['WaterResExploitSurface']].values[0]:
+            dat2.loc[[country], ['WaterSurfaceWithD']] = dat2.loc[[country], ['WaterResExploitSurface']].values[0]
+        if dat2.loc[[country], ['WaterGroundWithD']].values[0] < \
+                dat2.loc[[country], ['WaterResExploitGround']].values[0]:
+            dat2.loc[[country], ['WaterGroundWithD']] = dat2.loc[[country], ['WaterResExploitGround']].values[0]
+
 
     #print(medianSurfaceWithd)
     #print(medianGroundWithd)
