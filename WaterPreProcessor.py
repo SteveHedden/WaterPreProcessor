@@ -13,7 +13,7 @@ from sklearn import linear_model
 import seaborn as sns
 import math
 
-dat= pd.read_csv('C:\\Users\Steve\PycharmProjects\SecondProject\AQUASTATForPull.csv')
+dat= pd.read_csv('C:\\Users\Steve\PycharmProjects\WaterPreProcessor\AQUASTATForPull.csv')
 dat['country'] = dat['Country Name in IFs']
 dat['yearRef'] = dat['Year']
 countryList = dat.drop_duplicates(['country'])
@@ -45,6 +45,7 @@ def getYrOrMstRct(lookback, dat, baseyear, datDest, SeriesName):
 
 
 #Call getYrOrMstRct on all series
+#Comment out so this doesn't run every time because it takes so long
 '''
 for x in seriesNames:
     print(x)
@@ -169,8 +170,6 @@ dropNulls['SurfacePortion'] = dat2['WaterSurfaceWithD'] / dat2['WaterTotalWithdS
 dropNulls['GroundPortion'] = dat2['WaterGroundWithD'] / dat2['WaterTotalWithdSources']
 medianSurfaceWithd = dropNulls['SurfacePortion'].median()
 medianGroundWithd = dropNulls['GroundPortion'].median()
-print(medianSurfaceWithd)
-print(medianGroundWithd)
 
 
 #Begin hole filling
@@ -234,6 +233,23 @@ for index, country in countryList.iterrows():
                                                    dat2.loc[[country], ['WaterWithdIndustrial']].values[0] + \
                                                    dat2.loc[[country], ['WaterWithdAgriculture']].values[0]
 #Initialize growth rates for surface, ground, and fossil water withdrawals
+
+    # Create regression for estimating wastewater
+    y = dat2['WastewaterProduced']
+    X = dat2['WaterWithdMunicipal']
+    dropNulls = pd.concat([y, X], axis=1)
+    dropNulls.dropna(inplace=True)
+    y = dropNulls['WastewaterProduced']
+    X = dropNulls['WaterWithdMunicipal']
+    X = sm.add_constant(X)
+    model = sm.OLS(y, X, data=dropNulls, missing='drop')
+    WasteWaterModel = model.fit()
+    # print(IndModel.summary())
+    WasteWaterIVs = dat2['WaterWithdMunicipal']
+    WasteWaterIVs.dropna(inplace=True)
+    WasteWaterIVs = sm.add_constant(WasteWaterIVs)
+    WasteWaterIVs['predict'] = WasteWaterModel.predict(WasteWaterIVs)
+    WasteWaterIVs[WasteWaterIVs['predict'] < 0] = 0.005
 
 ##Total water resources
 #Fill in total renewable surface water if we have total and ground
@@ -428,6 +444,42 @@ for index, country in countryList.iterrows():
         if dat2.loc[[country], ['WaterGroundWithD']].values[0] < \
                 dat2.loc[[country], ['WaterResExploitGround']].values[0]:
             dat2.loc[[country], ['WaterGroundWithD']] = dat2.loc[[country], ['WaterResExploitGround']].values[0]
+
+#Wastewater produced, treated, and direct use of treated
+    if np.isnan(dat2.loc[[country], ['WastewaterProduced']].values[0]):
+        if country in WasteWaterIVs.index:
+            dat2.loc[[country], ['WastewaterProduced']] = (WasteWaterIVs.loc[[country], ['predict']].values[0])
+        # Create regression for estimating treated wastewater
+        WasterwaterTreated = dat2['WasterwaterTreated']
+        WastewaterProduced = dat2['WastewaterProduced']
+        logGDPPCP = Exog['logGDPPCP']
+        y = pd.concat([WasterwaterTreated, WastewaterProduced], axis=1)
+        y.dropna(inplace=True)
+        y['TreatedPortion'] = y['WasterwaterTreated'] / y['WastewaterProduced']
+        y = y['TreatedPortion']
+        X = Exog['logGDPPCP']
+        dropNulls = pd.concat([y, X], axis=1)
+        dropNulls.dropna(inplace=True)
+        y = dropNulls['TreatedPortion']
+        X = dropNulls['logGDPPCP']
+        X = sm.add_constant(X)
+        model = sm.OLS(y, X, data=dropNulls, missing='drop')
+        TreatedModel = model.fit()
+        # print(AgModel.summary())
+        TreatedIVs = Exog['logGDPPCP']
+        TreatedIVs = sm.add_constant(TreatedIVs)
+        TreatedIVs['predict'] = TreatedModel.predict(TreatedIVs)
+        TreatedIVs['WastewaterProduced'] = dat2['WastewaterProduced']
+        TreatedIVs['predict'] = TreatedIVs['predict'] * TreatedIVs['WastewaterProduced']
+        TreatedIVs[TreatedIVs['predict'] < 0] = 0.005
+    if np.isnan(dat2.loc[[country], ['WasterwaterTreated']].values[0]):
+        dat2.loc[[country], ['WasterwaterTreated']] = (TreatedIVs.loc[[country], ['predict']].values[0])
+    if dat2.loc[[country], ['WasterwaterTreated']].values[0] > dat2.loc[[country], ['WastewaterProduced']].values[0]:
+            dat2.loc[[country], ['WasterwaterTreated']] = 0.95 * dat2.loc[[country], ['WastewaterProduced']].values[0]
+    if np.isnan(dat2.loc[[country], ['WastewaterTreatedReused']].values[0]):
+            dat2.loc[[country], ['WastewaterTreatedReused']] = 0.66 * dat2.loc[[country], ['WasterwaterTreated']].values[0]
+    if dat2.loc[[country], ['WastewaterTreatedReused']].values[0] > dat2.loc[[country], ['WasterwaterTreated']].values[0]:
+            dat2.loc[[country], ['WastewaterTreatedReused']] = 0.95 * dat2.loc[[country], ['WasterwaterTreated']].values[0]
 
 
     #print(medianSurfaceWithd)
